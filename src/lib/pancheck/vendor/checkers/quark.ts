@@ -1,18 +1,14 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 夸克网盘链接检测
- * URL格式: https://pan.quark.cn/s/{pwd_id}?pwd={passcode}
- * 两步检测: 先获取stoken，再验证文件列表
- */
-async function checkQuark(link) {
+import { request } from './http';
+
+export async function checkQuark(link) {
   const { resId, pwd, error: parseError } = extractParamsQuark(link);
   if (parseError) {
     return { valid: false, reason: '链接格式无效: ' + parseError };
   }
 
   try {
-    // Step 1: 获取 stoken
     const tokenURL = 'https://drive-h.quark.cn/1/clouddrive/share/sharepage/token';
     const { statusCode: status1, body: body1 } = await request(tokenURL, {
       method: 'POST',
@@ -23,8 +19,8 @@ async function checkQuark(link) {
       },
       headers: {
         'Content-Type': 'application/json',
-        'Origin': 'https://pan.quark.cn',
-        'Referer': 'https://pan.quark.cn/',
+        Origin: 'https://pan.quark.cn',
+        Referer: 'https://pan.quark.cn/',
       },
     });
 
@@ -40,16 +36,15 @@ async function checkQuark(link) {
       return { valid: false, reason: '分享链接无效：未获取到访问令牌' };
     }
 
-    // Step 2: 获取文件列表
     const detailURL = `https://drive-pc.quark.cn/1/clouddrive/share/sharepage/detail?pwd_id=${encodeURIComponent(resId)}&stoken=${encodeURIComponent(tokenResp.data.stoken)}&ver=2&pr=ucpro`;
     const { statusCode: status2, body: body2 } = await request(detailURL, {
       headers: {
-        'Accept': 'application/json, text/plain, */*',
+        Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'zh-CN,zh;q=0.9',
         'Cache-Control': 'no-cache',
-        'Origin': 'https://pan.quark.cn',
-        'Referer': 'https://pan.quark.cn/',
-        'Pragma': 'no-cache',
+        Origin: 'https://pan.quark.cn',
+        Referer: 'https://pan.quark.cn/',
+        Pragma: 'no-cache',
       },
     });
 
@@ -69,7 +64,7 @@ async function checkQuark(link) {
   }
 }
 
-function extractParamsQuark(rawURL) {
+export function extractParamsQuark(rawURL) {
   const urlRegex = /^https:\/\/(?:pan\.quark\.cn|pan\.qoark\.cn)\/s\/[a-zA-Z0-9]+(?:\?[^#]*)?(?:#.*)?$/;
   if (!urlRegex.test(rawURL)) {
     return { resId: '', pwd: '', error: '无效的URL格式' };
@@ -93,5 +88,3 @@ function extractParamsQuark(rawURL) {
     return { resId: '', pwd: '', error: e.message };
   }
 }
-
-module.exports = { checkQuark, extractParamsQuark };

@@ -1,12 +1,8 @@
-const crypto = require('crypto');
-const zlib = require('zlib');
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 迅雷云盘链接检测
- * URL格式: https://pan.xunlei.com/s/{share_id}?pwd={pass_code}
- * 两步检测: 先获取captcha token，再调用share API
- */
+import crypto from 'crypto';
+import zlib from 'zlib';
+import { request } from './http';
 
 const XUNLEI_DEVICE_ID = '5505bd0cab8c9469b98e5891d9fb3e0d';
 const XUNLEI_CLIENT_ID = 'ZUBzD9J_XPXfn7f7';
@@ -26,18 +22,16 @@ const CAPTCHA_ALGORITHMS = [
   'ThTWPG5eC0UBqlbQ+04nZAptqGCdpv9o55A',
 ];
 
-function getCaptchaSign(clientID, clientVersion, packageName, deviceID) {
+export function getCaptchaSign(clientID, clientVersion, packageName, deviceID) {
   const timestamp = Date.now().toString();
   let str = `${clientID}${clientVersion}${packageName}${deviceID}${timestamp}`;
-
   for (const algorithm of CAPTCHA_ALGORITHMS) {
     str = crypto.createHash('md5').update(str + algorithm).digest('hex');
   }
-
   return { timestamp, sign: `1.${str}` };
 }
 
-async function getCaptchaToken(action, metas = {}) {
+export async function getCaptchaToken(action, metas = {}) {
   const { timestamp, sign: captchaSign } = getCaptchaSign(
     XUNLEI_CLIENT_ID, XUNLEI_CLIENT_VERSION, XUNLEI_PACKAGE_NAME, XUNLEI_DEVICE_ID
   );
@@ -47,22 +41,20 @@ async function getCaptchaToken(action, metas = {}) {
   metas.client_version = XUNLEI_CLIENT_VERSION;
   metas.package_name = XUNLEI_PACKAGE_NAME;
 
-  const requestBody = {
-    action,
-    captcha_token: '',
-    client_id: XUNLEI_CLIENT_ID,
-    device_id: XUNLEI_DEVICE_ID,
-    meta: metas,
-    redirect_uri: 'xlaccsdk01://xunlei.com/callback?state=harbor',
-  };
-
   const { statusCode, body, headers } = await request(
     'https://xluser-ssl.xunlei.com/v1/shield/captcha/init',
     {
       method: 'POST',
-      body: requestBody,
+      body: {
+        action,
+        captcha_token: '',
+        client_id: XUNLEI_CLIENT_ID,
+        device_id: XUNLEI_DEVICE_ID,
+        meta: metas,
+        redirect_uri: 'xlaccsdk01://xunlei.com/callback?state=harbor',
+      },
       headers: {
-        'Accept': 'application/json;charset=UTF-8',
+        Accept: 'application/json;charset=UTF-8',
         'Content-Type': 'application/json',
         'User-Agent': XUNLEI_UA,
         'X-Device-Id': XUNLEI_DEVICE_ID,
@@ -77,7 +69,6 @@ async function getCaptchaToken(action, metas = {}) {
   }
 
   let respBody = body;
-  // 解压 gzip/deflate
   const encoding = (headers['content-encoding'] || '').toLowerCase();
   if (encoding === 'gzip') {
     respBody = zlib.gunzipSync(Buffer.from(body, 'binary')).toString('utf-8');
@@ -86,16 +77,12 @@ async function getCaptchaToken(action, metas = {}) {
   }
 
   const data = JSON.parse(respBody);
-  if (data.url) {
-    throw new Error(`需要验证: ${data.url}`);
-  }
-  if (!data.captcha_token) {
-    throw new Error('未获取到验证码token');
-  }
+  if (data.url) throw new Error(`需要验证: ${data.url}`);
+  if (!data.captcha_token) throw new Error('未获取到验证码token');
   return data.captcha_token;
 }
 
-async function checkXunlei(link) {
+export async function checkXunlei(link) {
   const shareID = extractShareID(link);
   if (!shareID) {
     return { valid: false, reason: '链接格式无效：无法提取share_id' };
@@ -108,7 +95,6 @@ async function checkXunlei(link) {
   } catch (_) {}
 
   try {
-    // Step 1: 获取 captcha token
     let captchaToken = '';
     try {
       captchaToken = await getCaptchaToken('get:/drive/v1/share', {
@@ -119,17 +105,14 @@ async function checkXunlei(link) {
         client_version: '1.92.10',
         user_id: '0',
       });
-    } catch (_) {
-      // token获取失败时继续，不带token请求
-    }
+    } catch (_) {}
 
-    // Step 2: 调用share API
     const apiURL = `https://api-pan.xunlei.com/drive/v1/share?share_id=${encodeURIComponent(shareID)}&pass_code=${encodeURIComponent(passCode)}&limit=100&pass_code_token=&page_token=&thumbnail_size=SIZE_SMALL`;
     const reqHeaders = {
-      'Accept': '*/*',
+      Accept: '*/*',
       'Content-Type': 'application/json',
-      'Origin': 'https://pan.xunlei.com',
-      'Referer': 'https://pan.xunlei.com/',
+      Origin: 'https://pan.xunlei.com',
+      Referer: 'https://pan.xunlei.com/',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
       'Accept-Encoding': 'gzip, deflate',
       'X-Client-Id': XUNLEI_CLIENT_ID,
@@ -140,9 +123,7 @@ async function checkXunlei(link) {
     }
 
     const { statusCode, body, headers } = await request(apiURL, { headers: reqHeaders });
-
     let respBody = body;
-    // 解压
     const encoding = (headers['content-encoding'] || '').toLowerCase();
     if (encoding === 'gzip') {
       respBody = zlib.gunzipSync(Buffer.from(body, 'binary')).toString('utf-8');
@@ -151,14 +132,12 @@ async function checkXunlei(link) {
     }
 
     if (statusCode !== 200) {
-      let isRateLimited = false;
       try {
         const errData = JSON.parse(respBody);
-        if (errData.error_code === 9) isRateLimited = true;
         return {
           valid: false,
           reason: `HTTP状态码: ${statusCode}, 响应: ${respBody}`,
-          isRateLimited,
+          isRateLimited: errData.error_code === 9,
         };
       } catch (_) {
         return { valid: false, reason: `HTTP状态码: ${statusCode}` };
@@ -166,26 +145,16 @@ async function checkXunlei(link) {
     }
 
     const apiResp = JSON.parse(respBody);
-
-    if (apiResp.share_status === 'OK') {
-      return { valid: true, reason: '' };
-    }
-
-    if (apiResp.error) {
-      return { valid: false, reason: apiResp.error };
-    }
-
-    const statusText = apiResp.share_status_text || `分享状态: ${apiResp.share_status}`;
-    return { valid: false, reason: statusText };
+    if (apiResp.share_status === 'OK') return { valid: true, reason: '' };
+    if (apiResp.error) return { valid: false, reason: apiResp.error };
+    return { valid: false, reason: apiResp.share_status_text || `分享状态: ${apiResp.share_status}` };
   } catch (err) {
-    if (err.message === '请求超时') return { valid: true, reason: '' }; // 超时视为有效，避免误判
+    if (err.message === '请求超时') return { valid: true, reason: '' };
     return { valid: false, reason: `检测失败: ${err.message}` };
   }
 }
 
-function extractShareID(shareURL) {
+export function extractShareID(shareURL) {
   const match = shareURL.match(/pan\.xunlei\.com\/s\/([^?/#]+)/);
   return match ? match[1] : '';
 }
-
-module.exports = { checkXunlei, extractShareID, getCaptchaSign, getCaptchaToken };

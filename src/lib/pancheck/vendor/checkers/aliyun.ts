@@ -1,11 +1,8 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 阿里云盘链接检测
- * URL格式: https://www.alipan.com/s/{share_id} 或 https://www.aliyundrive.com/s/{share_id}
- * API: POST https://api.aliyundrive.com/adrive/v3/share_link/get_share_by_anonymous
- */
-async function checkAliyun(link) {
+import { request } from './http';
+
+export async function checkAliyun(link) {
   const { shareId, error: parseError } = extractParamsAliPan(link);
   if (parseError) {
     return { valid: false, reason: '链接格式无效: ' + parseError };
@@ -17,11 +14,11 @@ async function checkAliyun(link) {
       method: 'POST',
       body: { share_id: shareId },
       headers: {
-        'authorization': '',
+        authorization: '',
         'Content-Type': 'application/json',
-        'Origin': 'https://www.alipan.com',
-        'Referer': 'https://www.alipan.com/',
-        'Priority': 'u=1, i',
+        Origin: 'https://www.alipan.com',
+        Referer: 'https://www.alipan.com/',
+        Priority: 'u=1, i',
         'Sec-Ch-Ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
@@ -39,7 +36,7 @@ async function checkAliyun(link) {
       return { valid: false, reason: `API返回错误状态码: ${statusCode}` };
     }
 
-    JSON.parse(body); // 验证可解析即可
+    JSON.parse(body);
     return { valid: true, reason: '' };
   } catch (err) {
     if (err.message === '请求超时') return { valid: false, reason: '请求超时' };
@@ -47,7 +44,7 @@ async function checkAliyun(link) {
   }
 }
 
-function extractParamsAliPan(urlStr) {
+export function extractParamsAliPan(urlStr) {
   try {
     const u = new URL(urlStr);
     const pathParts = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
@@ -63,5 +60,3 @@ function extractParamsAliPan(urlStr) {
     return { shareId: '', error: e.message };
   }
 }
-
-module.exports = { checkAliyun, extractParamsAliPan };

@@ -1,13 +1,8 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 123网盘链接检测
- * URL格式: https://www.123pan.com/s/{shareKey}
- * API: GET https://www.123pan.com/api/share/info?shareKey={shareKey}
- *
- * 注意: 此检测器采用保守策略，超时/403/请求错误均视为有效，避免误判
- */
-async function check123(link) {
+import { request } from './http';
+
+export async function check123(link) {
   const { shareKey, error: parseError } = extractShareKey123(link);
   if (parseError) {
     return { valid: false, reason: '链接格式无效: ' + parseError };
@@ -21,35 +16,27 @@ async function check123(link) {
       },
     });
 
-    // 403视为有效（访问限制，不是链接失效）
-    if (statusCode === 403) {
-      return { valid: true, reason: '' };
-    }
-
-    if (statusCode !== 200) {
-      return { valid: true, reason: '' }; // 非预期状态码也视为有效，避免误判
-    }
+    if (statusCode === 403) return { valid: true, reason: '' };
+    if (statusCode !== 200) return { valid: true, reason: '' };
 
     let data;
     try {
       data = JSON.parse(body);
     } catch (_) {
-      return { valid: true, reason: '' }; // JSON解析错误视为有效
+      return { valid: true, reason: '' };
     }
 
-    // code==0 或 HasPwd==true 均视为有效
     if (data.code === 0 || data.data?.HasPwd === true) {
       return { valid: true, reason: '' };
     }
 
     return { valid: false, reason: '链接已失效' };
-  } catch (err) {
-    // 超时和请求错误均视为有效，避免误判
+  } catch (_) {
     return { valid: true, reason: '' };
   }
 }
 
-function extractShareKey123(urlStr) {
+export function extractShareKey123(urlStr) {
   const patterns = [
     /https?:\/\/(?:www\.)?(?:123684|123685|123912|123pan|123592|123865)\.com\/s\/([a-zA-Z0-9-]+)/,
     /https?:\/\/(?:www\.)?123pan\.cn\/s\/([a-zA-Z0-9-]+)/,
@@ -62,7 +49,6 @@ function extractShareKey123(urlStr) {
     }
   }
 
-  // Fallback: 从URL路径中提取
   try {
     const u = new URL(urlStr);
     const pathParts = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
@@ -73,5 +59,3 @@ function extractShareKey123(urlStr) {
 
   return { shareKey: '', error: '无法从URL中提取shareKey' };
 }
-
-module.exports = { check123, extractShareKey123 };

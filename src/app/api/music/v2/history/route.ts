@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
   if (!username) return unauthorized();
 
   try {
+    // 注意：records 按“播放队列顺序”返回（createdAt ASC），
+    // 前端再基于 lastPlayedAt 定位当前播放项。
     const records = await db.listMusicV2History(username);
     return NextResponse.json({ success: true, data: { records } });
   } catch (error) {

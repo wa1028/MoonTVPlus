@@ -128,6 +128,35 @@ export interface BookReadRecord {
   saveTime: number;
 }
 
+export interface BookTtsVoice {
+  name: string;
+  shortName: string;
+  locale: string;
+  gender?: string;
+  displayName: string;
+}
+
+export interface BookTtsBoundary {
+  offset: number;
+  duration: number;
+  text: string;
+}
+
+export interface BookTtsProgress {
+  sourceId: string;
+  bookId: string;
+  chapterHref: string;
+  chapterTitle?: string;
+  chunkIndex: number;
+  charOffset: number;
+  currentTimeSec?: number;
+  voice: string;
+  rate: string;
+  pitch: string;
+  volume: string;
+  saveTime: number;
+}
+
 export interface BookReadManifest {
   book: BookDetail;
   format: 'epub' | 'pdf';

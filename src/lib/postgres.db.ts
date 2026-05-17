@@ -1403,7 +1403,8 @@ export class PostgresStorage implements IStorage {
   async listMusicV2History(userName: string): Promise<MusicV2HistoryRecord[]> {
     try {
       const results = await this.db
-        .prepare('SELECT * FROM music_v2_history WHERE username = $1 ORDER BY last_played_at DESC')
+        // 按队列顺序返回；当前播放项由最大 last_played_at 决定
+        .prepare('SELECT * FROM music_v2_history WHERE username = $1 ORDER BY created_at ASC, last_played_at ASC')
         .bind(userName)
         .all();
 
@@ -1440,7 +1441,7 @@ export class PostgresStorage implements IStorage {
             username, song_id, source, songmid, name, artist, album, cover, duration_text, duration_sec,
             play_progress_sec, last_played_at, play_count, last_quality, created_at, updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           ON CONFLICT(username, song_id) DO UPDATE SET
             source = EXCLUDED.source,
             songmid = EXCLUDED.songmid,

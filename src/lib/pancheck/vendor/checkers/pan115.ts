@@ -1,11 +1,8 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 115网盘链接检测
- * URL格式: https://115cdn.com/s/{share_code}?password={receive_code}
- * API: GET https://115cdn.com/webapi/share/snap
- */
-async function check115(link) {
+import { request } from './http';
+
+export async function check115(link) {
   const { shareCode, receiveCode, error: parseError } = extractParams115(link);
   if (parseError || !shareCode || !receiveCode) {
     return { valid: false, reason: parseError || (!shareCode ? '缺少分享码' : '缺少提取码') };
@@ -15,7 +12,7 @@ async function check115(link) {
     const apiURL = `https://115cdn.com/webapi/share/snap?share_code=${encodeURIComponent(shareCode)}&offset=0&limit=20&receive_code=${encodeURIComponent(receiveCode)}&cid=`;
     const { statusCode, body } = await request(apiURL, {
       headers: {
-        'Referer': `https://115cdn.com/s/${shareCode}?password=${receiveCode}&`,
+        Referer: `https://115cdn.com/s/${shareCode}?password=${receiveCode}&`,
         'Sec-Ch-Ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
@@ -23,7 +20,7 @@ async function check115(link) {
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
         'X-Requested-With': 'XMLHttpRequest',
-        'Priority': 'u=1, i',
+        Priority: 'u=1, i',
       },
     });
 
@@ -32,10 +29,8 @@ async function check115(link) {
     }
 
     const data = JSON.parse(body);
-
     if (data.state === true && data.errno === 0) {
       let shareState = data.data?.share_state || 0;
-      // 兼容部分响应只在 shareinfo 中返回 share_state
       if (shareState === 0 && data.data?.shareinfo?.share_state) {
         shareState = data.data.shareinfo.share_state;
       }
@@ -44,8 +39,7 @@ async function check115(link) {
         return { valid: true, reason: '' };
       }
 
-      const failReason = (data.data?.shareinfo?.forbid_reason || '').trim()
-        || `链接状态异常(share_state=${shareState})`;
+      const failReason = (data.data?.shareinfo?.forbid_reason || '').trim() || `链接状态异常(share_state=${shareState})`;
       return { valid: false, reason: failReason };
     }
 
@@ -56,7 +50,7 @@ async function check115(link) {
   }
 }
 
-function extractParams115(urlStr) {
+export function extractParams115(urlStr) {
   try {
     const u = new URL(urlStr);
     const pathParts = u.pathname.replace(/\/+$/, '').split('/');
@@ -73,5 +67,3 @@ function extractParams115(urlStr) {
     return { shareCode: '', receiveCode: '', error: e.message };
   }
 }
-
-module.exports = { check115, extractParams115 };

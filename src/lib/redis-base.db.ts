@@ -807,7 +807,12 @@ export abstract class BaseRedisStorage implements IStorage {
     return Object.values(rows || {})
       .filter(Boolean)
       .map(value => JSON.parse(value as string) as MusicV2HistoryRecord)
-      .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt);
+      // 按队列顺序返回；当前播放项由最大 lastPlayedAt 决定
+      .sort((a, b) => {
+        const createdAtDiff = (a.createdAt || 0) - (b.createdAt || 0);
+        if (createdAtDiff !== 0) return createdAtDiff;
+        return (a.lastPlayedAt || 0) - (b.lastPlayedAt || 0);
+      });
   }
 
   async upsertMusicV2History(userName: string, record: MusicV2HistoryRecord): Promise<void> {

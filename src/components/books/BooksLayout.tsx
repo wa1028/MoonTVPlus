@@ -1,9 +1,11 @@
 'use client';
 
-import { BookOpen, ChevronLeft, History, Library, List, Search, Settings2 } from 'lucide-react';
+import { BookOpen, ChevronLeft, Headphones, History, Library, List, MoreVertical, Search, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { useSite } from '@/components/SiteProvider';
 
 const tabs = [
   { href: '/books', label: '发现', icon: Library },
@@ -30,8 +32,11 @@ function getStaticMeta(pathname: string) {
 export default function BooksLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { siteName } = useSite();
   const isRead = pathname === '/books/read';
   const [readHeader, setReadHeader] = useState<ReadHeaderPayload | null>(null);
+  const [readMenuOpen, setReadMenuOpen] = useState(false);
+  const readMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!isRead) return;
@@ -48,6 +53,19 @@ export default function BooksLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (!isRead) setReadHeader(null);
   }, [isRead, pathname]);
+
+  useEffect(() => {
+    if (!readMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!readMenuRef.current?.contains(event.target as Node)) {
+        setReadMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [readMenuOpen]);
 
   const meta = useMemo(() => {
     const base = getStaticMeta(pathname);
@@ -77,7 +95,7 @@ export default function BooksLayout({ children }: { children: React.ReactNode })
               <ChevronLeft className='h-5 w-5' />
             </Link>
           ) : (
-            <Link href='/' className='text-sm font-semibold text-sky-600'>MoonTV+</Link>
+            <Link href='/' className='text-sm font-semibold text-sky-600'>{siteName}</Link>
           )}
           <div className='min-w-0 flex-1'>
             <div className='group relative'>
@@ -99,14 +117,42 @@ export default function BooksLayout({ children }: { children: React.ReactNode })
               >
                 <List className='h-5 w-5' />
               </button>
-              <button
-                type='button'
-                onClick={() => window.dispatchEvent(new CustomEvent('books-read-toggle-settings'))}
-                className='inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800'
-                aria-label='设置'
-              >
-                <Settings2 className='h-5 w-5' />
-              </button>
+              <div className='relative' ref={readMenuRef}>
+                <button
+                  type='button'
+                  onClick={() => setReadMenuOpen((prev) => !prev)}
+                  className='inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800'
+                  aria-label='更多'
+                >
+                  <MoreVertical className='h-5 w-5' />
+                </button>
+                {readMenuOpen ? (
+                  <div className='absolute right-0 top-12 z-50 min-w-[9rem] overflow-hidden rounded-2xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-950'>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setReadMenuOpen(false);
+                        window.dispatchEvent(new CustomEvent('books-read-toggle-settings'));
+                      }}
+                      className='flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900'
+                    >
+                      <Settings2 className='h-4 w-4' />
+                      设置
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setReadMenuOpen(false);
+                        window.dispatchEvent(new CustomEvent('books-read-toggle-tts'));
+                      }}
+                      className='flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900'
+                    >
+                      <Headphones className='h-4 w-4' />
+                      听书
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : (
             <nav className='hidden items-center gap-2 md:flex'>

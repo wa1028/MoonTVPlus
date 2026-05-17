@@ -501,6 +501,13 @@ function HomeClient() {
               <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
                 热播短剧
               </h2>
+              <Link
+                href='/duanju'
+                className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              >
+                查看更多
+                <ChevronRight className='w-4 h-4 ml-1' />
+              </Link>
             </div>
             <ScrollableRow>
               {loading

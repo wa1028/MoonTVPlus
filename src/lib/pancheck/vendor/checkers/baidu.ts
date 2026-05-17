@@ -1,11 +1,8 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 百度网盘链接检测
- * URL格式: https://pan.baidu.com/s/{surl}?pwd={password}
- * 两步检测: 有密码时先验证密码获取randsk，再调用share/list
- */
-async function checkBaidu(link) {
+import { request } from './http';
+
+export async function checkBaidu(link) {
   const normalizedLink = normalizeBaiduURL(link);
   if (!normalizedLink) {
     return { valid: false, reason: '未找到有效的百度网盘URL' };
@@ -26,8 +23,6 @@ async function checkBaidu(link) {
 
   try {
     let bdclnd = '';
-
-    // 如果有提取码，先验证
     if (password) {
       const verifyURL = `https://pan.baidu.com/share/verify?surl=${encodeURIComponent(shorturl)}&pwd=${encodeURIComponent(password)}`;
       const formBody = `pwd=${encodeURIComponent(password)}&vcode=&vcode_str=`;
@@ -36,7 +31,7 @@ async function checkBaidu(link) {
         body: formBody,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': normalizedLink,
+          Referer: normalizedLink,
         },
       });
 
@@ -52,20 +47,16 @@ async function checkBaidu(link) {
       bdclnd = vData.randsk || '';
     }
 
-    // 调用 share/list API
     const apiURL = `https://pan.baidu.com/share/list?web=5&app_id=250528&desc=1&showempty=0&page=1&num=20&order=time&shorturl=${encodeURIComponent(shorturl)}&root=1&view_mode=1&channel=chunlei&web=1&clienttype=0`;
     const reqHeaders = {
-      'Accept': 'application/json, text/plain, */*',
+      Accept: 'application/json, text/plain, */*',
       'Accept-Language': 'zh,en-GB;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
     };
     if (bdclnd) {
-      reqHeaders['Cookie'] = `BDCLND=${bdclnd}`;
+      reqHeaders.Cookie = `BDCLND=${bdclnd}`;
     }
 
-    const { statusCode, body } = await request(apiURL, {
-      headers: reqHeaders,
-    });
-
+    const { statusCode, body } = await request(apiURL, { headers: reqHeaders });
     if (statusCode !== 200) {
       return { valid: false, reason: `API返回错误状态码: ${statusCode}` };
     }
@@ -73,7 +64,6 @@ async function checkBaidu(link) {
     const result = JSON.parse(body);
     const errno = result.errno;
     const errMsg = result.errmsg || result.err_msg || '';
-
     if (errno === 0) {
       return { valid: true, reason: '' };
     }
@@ -87,12 +77,10 @@ async function checkBaidu(link) {
   }
 }
 
-function normalizeBaiduURL(link) {
+export function normalizeBaiduURL(link) {
   const cleaned = link.trim();
   const startIdx = cleaned.indexOf('https://pan.baidu.com/s/');
-  if (startIdx === -1) {
-    return null;
-  }
+  if (startIdx === -1) return null;
   let endIdx = startIdx;
   while (endIdx < cleaned.length) {
     const char = cleaned[endIdx];
@@ -103,7 +91,7 @@ function normalizeBaiduURL(link) {
   return cleaned.substring(startIdx, endIdx).trim();
 }
 
-function extractBaiduShareID(shareURL) {
+export function extractBaiduShareID(shareURL) {
   try {
     const u = new URL(shareURL);
     if (u.pathname.startsWith('/s/')) {
@@ -123,11 +111,9 @@ function getFailureReason(errno, errMsg) {
   if (errMsg) return `分享链接无效 (errno: ${errno}, err_msg: ${errMsg})`;
   switch (errno) {
     case -12: return '缺少提取码 (errno: -12)';
-    case -9:  return '提取码错误 (errno: -9)';
+    case -9: return '提取码错误 (errno: -9)';
     case -62: return '请求接口受限 (errno: -62)';
-    case -8:  return '分享文件已过期 (errno: -8)';
-    default:  return `分享链接无效 (errno: ${errno})`;
+    case -8: return '分享文件已过期 (errno: -8)';
+    default: return `分享链接无效 (errno: ${errno})`;
   }
 }
-
-module.exports = { checkBaidu, normalizeBaiduURL, extractBaiduShareID };

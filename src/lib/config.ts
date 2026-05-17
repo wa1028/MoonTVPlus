@@ -5,6 +5,17 @@ import { db } from '@/lib/db';
 import { AdminConfig } from './admin.types';
 
 const BUILTIN_DANMAKU_API_BASE = 'https://mtvpls-danmu.netlify.app/87654321';
+const DEFAULT_LIVE_REFRESH_INTERVAL_HOURS = 12;
+
+function normalizeLiveRefreshIntervalHours(refreshIntervalHours?: number): number {
+  const normalizedInterval = Number(refreshIntervalHours);
+
+  if (!Number.isFinite(normalizedInterval) || normalizedInterval <= 0) {
+    return DEFAULT_LIVE_REFRESH_INTERVAL_HOURS;
+  }
+
+  return Math.floor(normalizedInterval);
+}
 
 export interface ApiSite {
   key: string;
@@ -545,6 +556,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (!adminConfig.LiveConfig || !Array.isArray(adminConfig.LiveConfig)) {
     adminConfig.LiveConfig = [];
   }
+  adminConfig.LiveRefreshIntervalHours = normalizeLiveRefreshIntervalHours(adminConfig.LiveRefreshIntervalHours);
 
   // 用户信息已迁移到新版数据库
   // 这里只保留站长用户用于兼容性，其他用户从数据库读取
@@ -808,6 +820,18 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     };
   } else if (adminConfig.MusicConfig.ProxyEnabled === undefined) {
     adminConfig.MusicConfig.ProxyEnabled = true;
+  }
+
+  if (!adminConfig.OPDSConfig) {
+    adminConfig.OPDSConfig = {
+      Enabled: false,
+      Sources: [],
+      CacheTTL: 10 * 60 * 1000,
+    };
+  } else {
+    if (adminConfig.OPDSConfig.CacheTTL === undefined) {
+      adminConfig.OPDSConfig.CacheTTL = 10 * 60 * 1000;
+    }
   }
 
   return adminConfig;

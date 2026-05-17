@@ -1,14 +1,8 @@
-const { request } = require('./http');
+// @ts-nocheck
 
-/**
- * 天翼云盘链接检测
- * URL格式:
- *   https://cloud.189.cn/web/share?code=xxx
- *   https://cloud.189.cn/t/xxx
- *   https://h5.cloud.189.cn/share.html#/t/xxx
- * API: GET https://cloud.189.cn/api/open/share/getShareInfoByCodeV2.action
- */
-async function checkTianyi(link) {
+import { request } from './http';
+
+export async function checkTianyi(link) {
   const { codeValue, accessCode, refererValue, error: parseError } = extractCodeFromURL(link);
   if (parseError) {
     return { valid: false, reason: '链接格式无效: ' + parseError };
@@ -16,7 +10,6 @@ async function checkTianyi(link) {
 
   try {
     const noCache = Math.random();
-    // 如果有访问码，需要将访问码包含在shareCode参数中
     let shareCodeParam = codeValue;
     if (accessCode) {
       shareCodeParam = `${codeValue}（访问码：${accessCode}）`;
@@ -25,8 +18,8 @@ async function checkTianyi(link) {
     const apiURL = `https://cloud.189.cn/api/open/share/getShareInfoByCodeV2.action?noCache=${noCache}&shareCode=${encodeURIComponent(shareCodeParam)}`;
     const { statusCode, body } = await request(apiURL, {
       headers: {
-        'Priority': 'u=1, i',
-        'Referer': refererValue,
+        Priority: 'u=1, i',
+        Referer: refererValue,
         'Sec-Ch-Ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
@@ -54,21 +47,17 @@ async function checkTianyi(link) {
   }
 }
 
-function extractCodeFromURL(urlStr) {
+export function extractCodeFromURL(urlStr) {
   try {
     const u = new URL(urlStr);
     let codeValue = '';
     let accessCode = '';
-
-    // 1. 从查询参数获取code
     codeValue = u.searchParams.get('code') || '';
 
-    // 2. 从路径获取 /t/xxx
     if (!codeValue && u.pathname.startsWith('/t/')) {
       codeValue = u.pathname.replace('/t/', '').split('/')[0];
     }
 
-    // 3. 从hash获取 #/t/xxx
     if (!codeValue && u.hash) {
       const fragment = u.hash.replace(/^#/, '');
       if (fragment.startsWith('/t/')) {
@@ -82,9 +71,7 @@ function extractCodeFromURL(urlStr) {
       return { codeValue: '', accessCode: '', refererValue: '', error: '输入URL中未找到code参数' };
     }
 
-    // 提取访问码（访问码：xxx）
-    const accessCodePattern = /[（(]访问码[：:]\s*([a-zA-Z0-9]+)[）)]/;
-    const match = urlStr.match(accessCodePattern);
+    const match = urlStr.match(/[（(]访问码[：:]\s*([a-zA-Z0-9]+)[）)]/);
     if (match && match[1]) {
       accessCode = match[1];
     }
@@ -94,5 +81,3 @@ function extractCodeFromURL(urlStr) {
     return { codeValue: '', accessCode: '', refererValue: '', error: e.message };
   }
 }
-
-module.exports = { checkTianyi, extractCodeFromURL };

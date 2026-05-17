@@ -273,6 +273,8 @@ export class DbManager {
   // Music V2 历史记录相关
   async listMusicV2History(userName: string): Promise<MusicV2HistoryRecord[]> {
     if (typeof (this.storage as any).listMusicV2History === 'function') {
+      // 按播放队列顺序返回（createdAt ASC），
+      // 当前播放项由调用方基于 lastPlayedAt 决定。
       return (this.storage as any).listMusicV2History(userName);
     }
     return [];
