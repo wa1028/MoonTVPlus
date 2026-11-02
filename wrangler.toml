@@ -40,3 +40,15 @@ NODE_ENV = "production"
 BUILD_TARGET = "cloudflare"
 # cron 路由等任务真正结束再返回（CF 上不需要 Vercel 那套"先返回 202 再后台跑"）
 CRON_WAIT_FOR_COMPLETION = "true"
+# ...
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
+# ...
