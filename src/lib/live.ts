@@ -170,10 +170,26 @@ async function fetchLiveList(
         signal: AbortSignal.timeout(LIVE_LIST_TIMEOUT_MS),
       });
       if (!response.ok) {
+        // 关键：把 501/403 这类状态码的“签发者”一并带出来。
+        // server 头能区分是源站（nginx）、隧道（frp）还是 Cloudflare 自己返回的；
+        // body 前缀能直接看出是谁的错误页。
+        const bits: string[] = [`HTTP ${response.status}`];
+        const server = response.headers.get('server');
+        if (server) bits.push(`server=${server}`);
+        const contentType = response.headers.get('content-type');
+        if (contentType) bits.push(`ct=${contentType}`);
         const mitigated = response.headers.get('cf-mitigated');
-        lastError = new Error(
-          `直播源请求失败: HTTP ${response.status}${mitigated ? ' (Cloudflare challenge)' : ''}, ua=${ua}`
-        );
+        if (mitigated) bits.push(`cf-mitigated=${mitigated}`);
+        try {
+          const snippet = (await response.text())
+            .slice(0, 200)
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (snippet) bits.push(`body=${snippet}`);
+        } catch {
+          // 读不出来就算了，不影响主流程
+        }
+        lastError = new Error(`直播源请求失败: ${bits.join(' | ')}, ua=${ua}`);
         continue;
       }
       const data = await response.text();
@@ -191,6 +207,104 @@ async function fetchLiveList(
 
   if (lastError instanceof Error) throw lastError;
   throw new Error(`直播源请求失败: ${String(lastError)}`);
+}
+
+/**
+ * 变体探测：同一个地址用几种不同的请求形态各打一次，用来区分
+ * “源站真不认这个请求”和“某一层中间设备（隧道/CDN）拦截”。
+ *
+ * 之所以需要它：Cloudflare 边缘到源站这一段，请求最终长什么样由运行时决定
+ * （协议、头部、是否走 scrape shield），代码侧看不到。只能靠对照实验。
+ */
+export type LiveProbeResult = {
+  name: string;
+  status?: number;
+  ms: number;
+  server?: string;
+  contentType?: string;
+  bytes?: number;
+  bodyHead?: string;
+  error?: string;
+};
+
+export async function probeLiveSource(
+  url: string,
+  uaOverride?: string
+): Promise<LiveProbeResult[]> {
+  const agent = uaOverride || defaultUA;
+  const variants: Array<{ name: string; init: RequestInit }> = [
+    {
+      name: 'plain',
+      init: {
+        headers: { 'User-Agent': agent },
+        redirect: 'follow',
+      },
+    },
+    {
+      // 部分 nginx/frp 组合对 br/zstd 协商有问题，退回 identity 试试
+      name: 'identity-encoding',
+      init: {
+        headers: { 'User-Agent': agent, 'Accept-Encoding': 'identity' },
+        redirect: 'follow',
+      },
+    },
+    {
+      // scrapeShield 是 Cloudflare 对同 zone 回源的抓取防护，会影响回源请求
+      name: 'no-scrape-shield',
+      init: {
+        headers: { 'User-Agent': agent },
+        redirect: 'follow',
+        cf: { scrapeShield: false },
+      } as unknown as RequestInit,
+    },
+    {
+      name: 'no-cache',
+      init: {
+        headers: {
+          'User-Agent': agent,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+        redirect: 'follow',
+      },
+    },
+  ];
+
+  const results: LiveProbeResult[] = [];
+  for (const variant of variants) {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(url, {
+        ...variant.init,
+        signal: AbortSignal.timeout(15000),
+      });
+      let bodyHead = '';
+      try {
+        bodyHead = (await response.text()).slice(0, 200).replace(/\s+/g, ' ');
+      } catch (error) {
+        bodyHead = `<读取响应体失败: ${error instanceof Error ? error.message : String(error)}>`;
+      }
+      results.push({
+        name: variant.name,
+        status: response.status,
+        ms: Date.now() - startedAt,
+        server: response.headers.get('server') || undefined,
+        contentType: response.headers.get('content-type') || undefined,
+        bytes: bodyHead.length,
+        bodyHead,
+      });
+    } catch (error) {
+      results.push({
+        name: variant.name,
+        ms: Date.now() - startedAt,
+        error:
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error),
+      });
+    }
+  }
+  return results;
 }
 
 /**

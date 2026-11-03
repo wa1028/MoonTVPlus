@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { diagnoseLiveSource } from '@/lib/live';
+import { diagnoseLiveSource, probeLiveSource } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
@@ -52,6 +52,13 @@ export async function GET(request: NextRequest) {
   }
 
   const result = await diagnoseLiveSource(target, ua);
+
+  // ?probe=1：再跑一组变体对照（不同请求形态各打一次），
+  // 用来区分“源站不认这个请求”与“中间设备拦截”。
+  if (searchParams.get('probe') === '1') {
+    result.probe = await probeLiveSource(target, ua);
+  }
+
   console.log('[live][diag]', JSON.stringify(result));
   return NextResponse.json(result, {
     headers: { 'cache-control': 'no-store' },
