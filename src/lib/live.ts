@@ -6,6 +6,21 @@ import { fetchLive } from '@/lib/live-http';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 
+// 列表与 EPG 分两级超时：没有超时的话，源站卡住会把请求一直挂到平台断开，
+// 表现就是“添加成功、频道数 0”，且日志里什么都看不到。
+const LIVE_LIST_TIMEOUT_MS = 20000;
+const LIVE_EPG_TIMEOUT_MS = 8000;
+// EPG 超过该体积直接跳过：几 MB 的 XML 在 Cloudflare Workers 上解析会顶到 CPU 上限，
+// 一旦超限是整个请求 1102，连频道列表都拿不到。默认 1.5MB，可用环境变量放宽。
+const LIVE_EPG_MAX_BYTES =
+  Number(process.env.LIVE_EPG_MAX_MB || 0) > 0
+    ? Number(process.env.LIVE_EPG_MAX_MB) * 1024 * 1024
+    : 1.5 * 1024 * 1024;
+
+// 部分源站/内网穿透节点会按 UA 或 TLS 指纹拦截，失败时用浏览器 UA 再试一次
+const LIVE_FALLBACK_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
 export const DEFAULT_LIVE_REFRESH_INTERVAL_HOURS = 12;
 
 let lastGlobalLiveRefreshTime = 0;
@@ -86,30 +101,167 @@ export async function refreshLiveChannels(liveInfo: {
   if (cachedLiveChannels[liveInfo.key]) {
     delete cachedLiveChannels[liveInfo.key];
   }
-  const ua = liveInfo.ua || defaultUA;
-  const response = await fetchLive(liveInfo.url, ua);
-  if (!response.ok) {
-    const mitigated = response.headers.get('cf-mitigated');
-    throw new Error(
-      `直播源请求失败: HTTP ${response.status}${mitigated ? ' (Cloudflare challenge)' : ''}, ua=${ua}`
-    );
-  }
-  const data = await response.text();
+  const startedAt = Date.now();
+
+  // 1) 拉列表：主 UA 失败自动换浏览器 UA 重试一次
+  const list = await fetchLiveList(liveInfo.url, liveInfo.ua || defaultUA);
+  const data = list.data;
+  const ua = list.ua;
+
+  // 2) 解析列表
   const result = isM3UContent(data)
     ? parseM3U(liveInfo.key, data)
     : parseTxtLive(liveInfo.key, data);
+
+  // 3) 先把频道写进缓存。EPG 只是锦上添花，绝不允许它把频道数打成 0
   const epgUrl = liveInfo.epg || result.tvgUrl;
-  const tvgIds = result.channels
-    .map((channel) => channel.tvgId)
-    .filter((tvgId) => tvgId);
-  const epgs = await parseEpg(epgUrl, liveInfo.ua || defaultUA, tvgIds);
   cachedLiveChannels[liveInfo.key] = {
     channelNumber: result.channels.length,
     channels: result.channels,
     epgUrl: epgUrl,
-    epgs: epgs,
+    epgs: {},
   };
+
+  // 4) EPG best-effort：单独超时、单独限制体积、失败只记日志
+  let epgEntries = 0;
+  let epgNote = 'skip';
+  if (epgUrl && epgUrl !== 'off') {
+    const tvgIds = result.channels
+      .map((channel) => channel.tvgId)
+      .filter((tvgId) => tvgId);
+    const epgStartedAt = Date.now();
+    try {
+      const epgs = await parseEpg(epgUrl, ua, tvgIds);
+      epgEntries = Object.keys(epgs).length;
+      cachedLiveChannels[liveInfo.key].epgs = epgs;
+      epgNote = `${Date.now() - epgStartedAt}ms/${epgEntries} 频道`;
+    } catch (error) {
+      epgNote = `失败(${error instanceof Error ? error.message : String(error)})`;
+      console.warn(`[live] ${liveInfo.key}: EPG 解析失败，已忽略: ${epgNote}`);
+    }
+  }
+
+  console.log(
+    `[live] ${liveInfo.key}: 列表 ${list.ms}ms/${list.bytes}B(ua=${ua}) -> ${result.channels.length} 频道；` +
+      `EPG ${epgNote}；总耗时 ${Date.now() - startedAt}ms`
+  );
+
   return result.channels.length;
+}
+
+/**
+ * 拉取直播源列表。带超时 + UA 回退：
+ * 主 UA 抛出异常或返回非 2xx 时，换浏览器 UA 再试一次，两次都失败才把错误抛出。
+ */
+async function fetchLiveList(
+  url: string,
+  primaryUA: string
+): Promise<{ data: string; ua: string; ms: number; bytes: number; status: number }> {
+  const candidates = [primaryUA, defaultUA, LIVE_FALLBACK_UA].filter(
+    (ua, index, arr) => ua && arr.indexOf(ua) === index
+  );
+  let lastError: unknown = null;
+
+  for (const ua of candidates) {
+    const startedAt = Date.now();
+    try {
+      const response = await fetchLive(url, ua, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(LIVE_LIST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const mitigated = response.headers.get('cf-mitigated');
+        lastError = new Error(
+          `直播源请求失败: HTTP ${response.status}${mitigated ? ' (Cloudflare challenge)' : ''}, ua=${ua}`
+        );
+        continue;
+      }
+      const data = await response.text();
+      return {
+        data,
+        ua,
+        ms: Date.now() - startedAt,
+        bytes: data.length,
+        status: response.status,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) throw lastError;
+  throw new Error(`直播源请求失败: ${String(lastError)}`);
+}
+
+/**
+ * 诊断用：完整跑一遍“拉列表 -> 解析 -> 拉 EPG”，把每一步的状态码、耗时、
+ * 体积、错误原样返回，用于在 Cloudflare 边缘定位问题到底卡在哪一步。
+ */
+export async function diagnoseLiveSource(
+  url: string,
+  uaOverride?: string
+): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = { url };
+  const startedAt = Date.now();
+  const ua = uaOverride || defaultUA;
+
+  try {
+    const list = await fetchLiveList(url, ua);
+    result.list = {
+      status: list.status,
+      ua: list.ua,
+      ms: list.ms,
+      bytes: list.bytes,
+      head: list.data.slice(0, 120),
+    };
+    const parsed = isM3UContent(list.data)
+      ? parseM3U('diag', list.data)
+      : parseTxtLive('diag', list.data);
+    result.isM3U = isM3UContent(list.data);
+    result.channels = parsed.channels.length;
+    result.tvgUrl = parsed.tvgUrl;
+    result.sample = parsed.channels
+      .slice(0, 3)
+      .map((c) => ({ name: c.name, group: c.group, url: c.url }));
+
+    if (parsed.tvgUrl) {
+      const epgStartedAt = Date.now();
+      try {
+        const epgResponse = await fetchLive(parsed.tvgUrl, list.ua, {
+          signal: AbortSignal.timeout(LIVE_EPG_TIMEOUT_MS),
+        });
+        const declaredLength =
+          Number(epgResponse.headers.get('content-length') || 0) || 0;
+        result.epg = {
+          status: epgResponse.status,
+          ms: Date.now() - epgStartedAt,
+          declaredLength,
+          contentEncoding: epgResponse.headers.get('content-encoding'),
+        };
+        try {
+          await epgResponse.body?.cancel();
+        } catch {
+          // ignore
+        }
+      } catch (error) {
+        result.epg = {
+          ms: Date.now() - epgStartedAt,
+          error:
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error),
+        };
+      }
+    }
+  } catch (error) {
+    result.ok = false;
+    result.error =
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  }
+
+  result.ok = result.ok !== false;
+  result.totalMs = Date.now() - startedAt;
+  return result;
 }
 
 async function parseEpg(
@@ -133,8 +285,25 @@ async function parseEpg(
   } = {};
 
   try {
-    const response = await fetchLive(epgUrl, ua);
+    const response = await fetchLive(epgUrl, ua, {
+      signal: AbortSignal.timeout(LIVE_EPG_TIMEOUT_MS),
+    });
     if (!response.ok) {
+      return {};
+    }
+    const declaredLength =
+      Number(response.headers.get('content-length') || 0) || 0;
+    if (declaredLength > LIVE_EPG_MAX_BYTES) {
+      console.warn(
+        `[live] EPG 体积 ${declaredLength}B 超过上限 ${LIVE_EPG_MAX_BYTES}B，已跳过解析`
+      );
+      if (response.body) {
+        try {
+          await response.body.cancel();
+        } catch {
+          // ignore
+        }
+      }
       return {};
     }
 

@@ -9182,6 +9182,12 @@ const CategoryConfig = ({
         throw new Error(data.error || `操作失败: ${resp.status}`);
       }
 
+      // 后端会把“刷新失败原因”放在 warning 里，直接弹出来，免得只看到频道数 0
+      const okData = await resp.json().catch(() => ({} as any));
+      if (okData?.warning) {
+        showError(`频道刷新失败：${okData.warning}`, showAlert);
+      }
+
       // 成功后刷新配置
       await refreshConfig();
     } catch (err) {
@@ -18139,13 +18145,31 @@ const LiveSourceConfig = ({
           throw new Error(data.error || `刷新失败: ${response.status}`);
         }
 
+        const data = await response.json().catch(() => ({} as any));
+
         // 刷新成功后重新获取配置
         await refreshConfig();
+
+        const warnings: { name?: string; key: string; error: string }[] =
+          data?.warnings || [];
+        if (warnings.length > 0) {
+          showError(
+            `以下直播源刷新失败：\n${warnings
+              .map((w) => `${w.name || w.key}：${w.error}`)
+              .join('\n')}`,
+            showAlert
+          );
+          return;
+        }
+
+        const summary = (data?.results || [])
+          .map((r: any) => `${r.name || r.key}：${r.channels} 频道`)
+          .join('\n');
         showAlert({
           type: 'success',
           title: '刷新成功',
-          message: '直播源已刷新',
-          timer: 2000,
+          message: summary || '直播源已刷新',
+          timer: 3000,
         });
       } catch (err) {
         showError(err instanceof Error ? err.message : '刷新失败', showAlert);

@@ -34,6 +34,9 @@ export async function POST(request: NextRequest) {
       config.LiveConfig = [];
     }
 
+    // 刷新失败不再静默：把原因带回管理端，否则前端只能看到“频道数 0”
+    let refreshWarning: string | undefined;
+
     switch (action) {
       case 'add':
         // 检查是否已存在相同的 key
@@ -56,7 +59,9 @@ export async function POST(request: NextRequest) {
           const nums = await refreshLiveChannels(liveInfo);
           liveInfo.channelNumber = nums;
         } catch (error) {
-          console.error('刷新直播源失败:', error);
+          refreshWarning =
+            error instanceof Error ? error.message : String(error);
+          console.error(`刷新直播源失败(${key}): ${refreshWarning}`);
           liveInfo.channelNumber = 0;
         }
 
@@ -172,7 +177,10 @@ export async function POST(request: NextRequest) {
     // 保存配置
     await db.saveAdminConfig(config);
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      warning: refreshWarning,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '操作失败' },
