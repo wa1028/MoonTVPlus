@@ -36,12 +36,6 @@ crons = ["0 1 * * *"]
 # 注意：[vars] 必须留在文件最后。
 # cloudflare-deploy.yml 是用 `echo >> wrangler.toml` 追加环境变量的，
 # 追加的变量会落在文件末尾 —— 只有 [vars] 在最后它们才会进 [vars]。
-[vars]
-NODE_ENV = "production"
-BUILD_TARGET = "cloudflare"
-# cron 路由等任务真正结束再返回（CF 上不需要 Vercel 那套"先返回 202 再后台跑"）
-CRON_WAIT_FOR_COMPLETION = "true"
-# ...
 [observability.logs]
 enabled = true
 head_sampling_rate = 1
@@ -53,3 +47,11 @@ enabled = false
 head_sampling_rate = 1
 persist = true
 # ...
+
+[vars]
+NODE_ENV = "production"
+BUILD_TARGET = "cloudflare"
+# cron 路由等任务真正结束再返回（CF 上不需要 Vercel 那套"先返回 202 再后台跑"）
+CRON_WAIT_FOR_COMPLETION = "true"
+# ...
+
